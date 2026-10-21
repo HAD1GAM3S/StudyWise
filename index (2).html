@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>StudyWise</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<main id="auth-view" class="auth">
+  <div class="wrap auth-grid">
+    <section class="auth-hero">
+      <div class="brand">
+        <svg class="logo" width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="8"/><path d="M8 15.5l4.5 4.5L22 10"/></svg>
+        StudyWise
+      </div>
+      <h1>Every deadline, crossed off as it passes.</h1>
+      <p>Put homework, quizzes, exams and projects on one calendar. Days cross out on their own as the date moves, and the next month opens when the last day is done.</p>
+      <div>
+        <div class="week" id="week-strip" role="img" aria-label="This week, with past days crossed out"></div>
+        <p class="hint" style="margin-top:10px">This week, drawn from today's date.</p>
+      </div>
+    </section>
+
+    <section class="auth-card" aria-labelledby="auth-title">
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab" role="tab" id="tab-in" data-act="mode" data-mode="in" aria-selected="true">Sign in</button>
+        <button type="button" class="tab" role="tab" id="tab-up" data-act="mode" data-mode="up" aria-selected="false">Create account</button>
+      </div>
+      <h2 id="auth-title">Welcome back</h2>
+      <form id="auth-form" novalidate>
+        <label class="field" id="name-field" hidden>Your name
+          <input type="text" id="auth-name" autocomplete="name" placeholder="Amira Khan">
+        </label>
+        <label class="field">Email
+          <input type="email" id="auth-email" autocomplete="email" placeholder="you@school.edu">
+        </label>
+        <label class="field">Password
+          <input type="password" id="auth-pass" autocomplete="current-password" placeholder="At least 6 characters">
+        </label>
+        <p class="err" id="auth-err" role="alert"></p>
+        <button type="submit" class="btn primary" id="auth-submit">Sign in</button>
+      </form>
+      <p class="fine">Just looking? <button type="button" class="linkish" data-act="guest">Try it without an account</button>. Accounts and data are saved in this browser only.</p>
+    </section>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var SHORT = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  var authMode = 'in';
+
+  /* storage (falls back to memory if the browser blocks it) */
+  var mem = {};
+  var store = {
+    get: function (k) { try { var v = localStorage.getItem(k); return v === null ? (mem[k] || null) : v; } catch (e) { return mem[k] || null; } },
+    set: function (k, v) { mem[k] = v; try { localStorage.setItem(k, v); } catch (e) {} },
+    del: function (k) { delete mem[k]; try { localStorage.removeItem(k); } catch (e) {} }
+  };
+  function readJSON(k, fallback) { try { var v = store.get(k); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } }
+  function writeJSON(k, v) { store.set(k, JSON.stringify(v)); }
+  function $(id) { return document.getElementById(id); }
+
+  /* dates */
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function keyOf(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function todayDate() { var n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); }
+  function addDays(d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
+
+  /* password hashing */
+  function simpleHash(s) { var h = 5381; for (var i = 0; i < s.length; i++) { h = ((h << 5) + h + s.charCodeAt(i)) | 0; } return 'x' + h; }
+  function hashPw(s) {
+    try {
+      if (window.crypto && crypto.subtle && window.TextEncoder) {
+        return crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)).then(function (b) {
+          return Array.prototype.map.call(new Uint8Array(b), function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+        }).catch(function () { return simpleHash(s); });
+      }
+    } catch (e) {}
+    return Promise.resolve(simpleHash(s));
+  }
+
+  function setMode(mode) {
+    authMode = mode;
+    var up = mode === 'up';
+    $('tab-in').setAttribute('aria-selected', up ? 'false' : 'true');
+    $('tab-up').setAttribute('aria-selected', up ? 'true' : 'false');
+    $('name-field').hidden = !up;
+    $('auth-title').textContent = up ? 'Create your account' : 'Welcome back';
+    $('auth-submit').textContent = up ? 'Create account' : 'Sign in';
+    $('auth-pass').setAttribute('autocomplete', up ? 'new-password' : 'current-password');
+    $('auth-err').textContent = '';
+  }
+
+  var TYPOS = {
+    'gmial.com': 'gmail.com', 'gmai.com': 'gmail.com', 'gmal.com': 'gmail.com', 'gamil.com': 'gmail.com', 'gnail.com': 'gmail.com',
+    'gmail.co': 'gmail.com', 'gmail.con': 'gmail.com', 'gmail.cm': 'gmail.com', 'hotmial.com': 'hotmail.com', 'hotmal.com': 'hotmail.com',
+    'hotmail.co': 'hotmail.com', 'outlok.com': 'outlook.com', 'outlook.co': 'outlook.com', 'yahooo.com': 'yahoo.com', 'yaho.com': 'yahoo.com',
+    'yahoo.co': 'yahoo.com', 'iclould.com': 'icloud.com', 'icloud.co': 'icloud.com'
+  };
+  var DISPOSABLE = ['mailinator.com', 'guerrillamail.com', '10minutemail.com', 'tempmail.com', 'temp-mail.org', 'yopmail.com', 'trashmail.com', 'throwawaymail.com', 'sharklasers.com', 'getnada.com', 'maildrop.cc'];
+
+  function checkEmail(email) {
+    var bad = 'That email does not look real. Use an address you can open, like you@school.edu.';
+    var at = email.lastIndexOf('@');
+    if (at < 1 || at !== email.indexOf('@')) return bad;
+    var local = email.slice(0, at), domain = email.slice(at + 1);
+    if (local.length > 64 || !/^[a-z0-9._%+\-]+$/.test(local) || local[0] === '.' || local[local.length - 1] === '.' || local.indexOf('..') !== -1) return bad;
+    var labels = domain.split('.');
+    if (labels.length < 2) return bad;
+    for (var i = 0; i < labels.length; i++) {
+      if (!/^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$/.test(labels[i])) return bad;
+    }
+    var tld = labels[labels.length - 1];
+    if (!/^[a-z]{2,24}$/.test(tld)) return bad;
+    if (TYPOS[domain]) return 'Did you mean ' + local + '@' + TYPOS[domain] + '? Fix the spelling and try again.';
+    if (DISPOSABLE.indexOf(domain) !== -1) return 'Temporary email addresses are not accepted. Use your own email.';
+    return '';
+  }
+
+  /* signed in: go to the calendar page */
+  function enter(email) {
+    store.set('sw.session', email);
+    window.location.href = 'calendar.html';
+  }
+
+  function onAuthSubmit(e) {
+    e.preventDefault();
+    var err = $('auth-err');
+    var email = $('auth-email').value.trim().toLowerCase();
+    var pass = $('auth-pass').value;
+    var name = $('auth-name').value.trim();
+    err.textContent = '';
+    var emailErr = authMode === 'up' ? checkEmail(email) : (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? '' : 'Enter a valid email address, like you@school.edu.');
+    if (emailErr) { err.textContent = emailErr; return; }
+    if (pass.length < 6) { err.textContent = 'Use a password with at least 6 characters.'; return; }
+    var users = readJSON('sw.users', {});
+    hashPw(email + '|' + pass).then(function (h) {
+      if (authMode === 'up') {
+        if (!name) { err.textContent = 'Add your name so StudyWise can greet you.'; return; }
+        if (users[email]) { err.textContent = 'That email already has an account. Switch to Sign in.'; return; }
+        users[email] = { name: name, hash: h };
+        writeJSON('sw.users', users);
+        enter(email);
+      } else {
+        var u = users[email];
+        if (!u) { err.textContent = 'No account uses that email in this browser. Switch to Create account.'; return; }
+        if (u.hash !== h) { err.textContent = 'The password does not match. Check it and try again.'; return; }
+        enter(email);
+      }
+    });
+  }
+
+  function guest() {
+    var users = readJSON('sw.users', {});
+    if (!users['guest@studywise.local']) {
+      users['guest@studywise.local'] = { name: 'Guest', hash: '' };
+      writeJSON('sw.users', users);
+    }
+    enter('guest@studywise.local');
+  }
+
+  /* this week, drawn from today's date */
+  function renderWeek() {
+    var t = todayDate();
+    var mon = addDays(t, -((t.getDay() + 6) % 7));
+    var tk = keyOf(t), html = '';
+    for (var i = 0; i < 7; i++) {
+      var d = addDays(mon, i), k = keyOf(d);
+      html += '<div class="wk' + (k < tk ? ' past' : '') + (k === tk ? ' today' : '') + '"><small>' + SHORT[i] + '</small><b>' + d.getDate() + '</b></div>';
+    }
+    $('week-strip').innerHTML = html;
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-act]');
+    if (!t) return;
+    var act = t.getAttribute('data-act');
+    if (act === 'mode') setMode(t.getAttribute('data-mode'));
+    else if (act === 'guest') guest();
+  });
+  $('auth-form').addEventListener('submit', onAuthSubmit);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) renderWeek(); });
+
+  /* already signed in? skip straight to the calendar */
+  var sess = store.get('sw.session');
+  var users = readJSON('sw.users', {});
+  if (sess && users[sess]) { window.location.replace('calendar.html'); return; }
+
+  renderWeek();
+  setMode('in');
+})();
+</script>
+</body>
+</html>

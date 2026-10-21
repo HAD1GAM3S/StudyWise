@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>StudyWise Calendar</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap topbar-in">
+    <div class="brand">
+      <svg class="logo" width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="8"/><path d="M8 15.5l4.5 4.5L22 10"/></svg>
+      StudyWise
+    </div>
+    <div class="who">
+      <span class="today-line" id="today-line"></span>
+      <span id="who-name"></span>
+      <button type="button" class="btn small" data-act="signout">Sign out</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap app">
+  <section class="cal-col">
+    <div class="card">
+      <div class="cal-head">
+        <div>
+          <h2 id="month-title"></h2>
+          <p id="month-sub"></p>
+        </div>
+        <div class="nav">
+          <button type="button" class="btn small" data-act="prev" aria-label="Previous month">&larr;</button>
+          <button type="button" class="btn small" data-act="today">Today</button>
+          <button type="button" class="btn small" data-act="next" aria-label="Next month">&rarr;</button>
+        </div>
+      </div>
+      <div class="prog" aria-hidden="true"><div id="prog-bar" style="width:0"></div></div>
+      <div class="dow" id="dow"></div>
+      <div class="grid" id="grid"></div>
+      <ul class="legend">
+        <li class="t-hw"><i></i>Homework</li>
+        <li class="t-exam"><i></i>Exam</li>
+        <li class="t-quiz"><i></i>Quiz</li>
+        <li class="t-project"><i></i>Project</li>
+        <li class="t-other"><i></i>Other</li>
+      </ul>
+    </div>
+
+    <div class="split">
+      <div class="card">
+        <h3>Add to calendar</h3>
+        <form id="ev-form" novalidate>
+          <label class="field" for="ev-title">What is it?
+            <input type="text" id="ev-title" placeholder="Chapter 5 problem set" maxlength="120">
+          </label>
+          <div class="two">
+            <label class="field" for="ev-subject">Subject
+              <input type="text" id="ev-subject" placeholder="Physics" maxlength="40">
+            </label>
+            <label class="field" for="ev-type">Type
+              <select id="ev-type">
+                <option value="hw">Homework</option>
+                <option value="exam">Exam</option>
+                <option value="quiz">Quiz</option>
+                <option value="project">Project</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+          </div>
+          <div class="two">
+            <label class="field" for="ev-date">Due date
+              <input type="date" id="ev-date">
+            </label>
+            <label class="field" for="ev-time">Time (optional)
+              <input type="time" id="ev-time">
+            </label>
+          </div>
+          <p class="err" id="ev-err" role="alert"></p>
+          <button type="submit" class="btn primary">Add to calendar</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3 id="agenda-title">Selected day</h3>
+        <ul id="agenda"></ul>
+      </div>
+    </div>
+  </section>
+
+  <aside class="side">
+    <div class="card">
+      <div class="todo-head"><h3>My to-do</h3><span id="todo-count"></span></div>
+      <form class="todo-add" id="todo-form" novalidate>
+        <input type="text" id="todo-text" placeholder="Something personal to do" maxlength="120" aria-label="New to-do">
+        <button type="submit" class="btn primary">Add</button>
+      </form>
+      <p class="err" id="todo-err" role="alert"></p>
+      <ul id="todos"></ul>
+      <button type="button" class="btn small ghost" id="clear-done" data-act="clear-done" hidden style="margin-top:10px">Clear completed</button>
+    </div>
+    <div class="card">
+      <h3>Coming up</h3>
+      <div id="upcoming"></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  var SHORT = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  var TYPES = { hw: 'Homework', exam: 'Exam', quiz: 'Quiz', project: 'Project', other: 'Other' };
+
+  /* storage (falls back to memory if the browser blocks it) */
+  var mem = {};
+  var store = {
+    get: function (k) { try { var v = localStorage.getItem(k); return v === null ? (mem[k] || null) : v; } catch (e) { return mem[k] || null; } },
+    set: function (k, v) { mem[k] = v; try { localStorage.setItem(k, v); } catch (e) {} },
+    del: function (k) { delete mem[k]; try { localStorage.removeItem(k); } catch (e) {} }
+  };
+  function readJSON(k, fallback) { try { var v = store.get(k); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } }
+  function writeJSON(k, v) { store.set(k, JSON.stringify(v)); }
+
+  /* must be signed in, otherwise go back to the sign-in page */
+  var sess = store.get('sw.session');
+  var users = readJSON('sw.users', {});
+  if (!sess || !users[sess]) { window.location.replace('index.html'); return; }
+
+  /* dates */
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function keyOf(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function parseKey(k) { var p = k.split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function todayDate() { var n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); }
+  function addDays(d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
+  function longDate(d) { return DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear(); }
+  function longDateShort(k) { var d = parseKey(k); return d.getDate() + ' ' + MONTHS[d.getMonth()].slice(0, 3); }
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function $(id) { return document.getElementById(id); }
+
+  /* state */
+  var state = { email: sess, name: users[sess].name, data: { events: [], todos: [] }, vy: 0, vm: 0, sel: '', follow: true, lastToday: '' };
+  function dataKey() { return 'sw.data.' + state.email; }
+  function save() { writeJSON(dataKey(), state.data); }
+
+  (function load() {
+    var d = readJSON(dataKey(), null);
+    state.data = d && d.events && d.todos ? d : { events: [], todos: [] };
+    /* remove example items an earlier version added */
+    var before = state.data.events.length + state.data.todos.length;
+    state.data.events = state.data.events.filter(function (x) { return !x.sample; });
+    state.data.todos = state.data.todos.filter(function (x) { return !x.sample; });
+    if (before !== state.data.events.length + state.data.todos.length) save();
+    var t = todayDate();
+    state.vy = t.getFullYear(); state.vm = t.getMonth();
+    state.sel = keyOf(t); state.lastToday = keyOf(t);
+  })();
+
+  function signOut() {
+    store.del('sw.session');
+    window.location.href = 'index.html';
+  }
+
+  /* rendering */
+  function eventsByDate() {
+    var map = {};
+    state.data.events.forEach(function (ev) { (map[ev.date] = map[ev.date] || []).push(ev); });
+    Object.keys(map).forEach(function (k) { map[k].sort(function (a, b) { return (a.time || '99:99') < (b.time || '99:99') ? -1 : 1; }); });
+    return map;
+  }
+
+  function renderCalendar() {
+    var y = state.vy, m = state.vm;
+    var first = new Date(y, m, 1);
+    var offset = (first.getDay() + 6) % 7;
+    var dim = new Date(y, m + 1, 0).getDate();
+    var total = Math.ceil((offset + dim) / 7) * 7;
+    var tk = keyOf(todayDate());
+    var map = eventsByDate();
+    var crossed = 0, html = '';
+
+    for (var i = 0; i < total; i++) {
+      var d = new Date(y, m, 1 - offset + i);
+      var k = keyOf(d);
+      if (d.getMonth() !== m) { html += '<div class="day out" aria-hidden="true"><span class="num">' + d.getDate() + '</span></div>'; continue; }
+      var past = k < tk, isToday = k === tk, isSel = k === state.sel;
+      if (past) crossed++;
+      var evs = map[k] || [];
+      var chips = '', dots = '';
+      evs.slice(0, 2).forEach(function (ev) { chips += '<span class="chip t-' + ev.type + (ev.done ? ' done' : '') + '">' + esc(ev.title) + '</span>'; });
+      if (evs.length > 2) chips += '<span class="more">+' + (evs.length - 2) + ' more</span>';
+      evs.slice(0, 6).forEach(function (ev) { dots += '<span class="dot t-' + ev.type + '"></span>'; });
+      var label = longDate(d) + (isToday ? ', today' : past ? ', crossed out' : '') + ', ' + (evs.length ? evs.length + (evs.length === 1 ? ' item' : ' items') : 'nothing due');
+      html += '<button type="button" class="day' + (past ? ' past' : '') + (isToday ? ' today' : '') + (isSel ? ' sel' : '') + '" data-act="pick" data-date="' + k + '" aria-pressed="' + isSel + '" aria-label="' + esc(label) + '">' +
+        '<span class="num">' + d.getDate() + '</span><span class="chips">' + chips + '</span><span class="dots">' + dots + '</span></button>';
+    }
+    $('grid').innerHTML = html;
+    $('month-title').textContent = MONTHS[m] + ' ' + y;
+
+    var t = todayDate();
+    var current = t.getFullYear() === y && t.getMonth() === m;
+    var sub;
+    if (crossed >= dim) sub = 'All ' + dim + ' days crossed';
+    else if (crossed === 0 && !current) sub = dim + ' days ahead';
+    else sub = crossed + ' of ' + dim + ' days crossed, ' + (dim - crossed) + ' to go';
+    $('month-sub').textContent = sub;
+    $('prog-bar').style.width = Math.round((crossed / dim) * 100) + '%';
+  }
+
+  function renderDow() {
+    $('dow').innerHTML = SHORT.map(function (s) { return '<span>' + s + '</span>'; }).join('');
+  }
+
+  function evItem(ev) {
+    return '<li class="item t-' + ev.type + (ev.done ? ' done' : '') + '">' +
+      '<input type="checkbox" data-act="toggle-ev" data-id="' + ev.id + '"' + (ev.done ? ' checked' : '') + ' aria-label="Mark done: ' + esc(ev.title) + '">' +
+      '<div class="body"><span class="t">' + esc(ev.title) + '</span><span class="meta"><span class="badge">' + TYPES[ev.type] + '</span>' +
+      (ev.subject ? '<span>' + esc(ev.subject) + '</span>' : '') + (ev.time ? '<span class="mono">' + esc(ev.time) + '</span>' : '') + '</span></div>' +
+      '<button type="button" class="icon" data-act="del-ev" data-id="' + ev.id + '" aria-label="Delete ' + esc(ev.title) + '">&times;</button></li>';
+  }
+
+  function renderAgenda() {
+    $('agenda-title').textContent = longDate(parseKey(state.sel));
+    var evs = eventsByDate()[state.sel] || [];
+    $('agenda').innerHTML = evs.length
+      ? evs.map(evItem).join('')
+      : '<li class="empty">Nothing due on this day. Add homework, a quiz or an exam with the form.</li>';
+    var dateInput = $('ev-date');
+    if (document.activeElement !== dateInput) dateInput.value = state.sel;
+  }
+
+  function renderTodos() {
+    var todos = state.data.todos.slice().sort(function (a, b) { return (a.done ? 1 : 0) - (b.done ? 1 : 0); });
+    var done = state.data.todos.filter(function (t) { return t.done; }).length;
+    $('todo-count').textContent = state.data.todos.length ? done + ' of ' + state.data.todos.length + ' done' : '';
+    $('todos').innerHTML = todos.length ? todos.map(function (t) {
+      return '<li class="item' + (t.done ? ' done' : '') + '"><input type="checkbox" data-act="toggle-todo" data-id="' + t.id + '"' + (t.done ? ' checked' : '') + ' aria-label="Mark done: ' + esc(t.text) + '">' +
+        '<div class="body"><span class="t">' + esc(t.text) + '</span></div>' +
+        '<button type="button" class="icon" data-act="del-todo" data-id="' + t.id + '" aria-label="Delete ' + esc(t.text) + '">&times;</button></li>';
+    }).join('') : '<li class="empty">Your list is clear. Add errands, workouts or anything outside school.</li>';
+    $('clear-done').hidden = done === 0;
+  }
+
+  function relLabel(k) {
+    var diff = Math.round((parseKey(k) - todayDate()) / 864e5);
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Tomorrow';
+    if (diff > 1 && diff < 7) return 'In ' + diff + ' days';
+    return longDateShort(k);
+  }
+
+  function renderUpcoming() {
+    var tk = keyOf(todayDate());
+    var open = state.data.events.filter(function (e) { return !e.done; });
+    var late = open.filter(function (e) { return e.date < tk; }).length;
+    var next = open.filter(function (e) { return e.date >= tk; }).sort(function (a, b) {
+      return (a.date + (a.time || '99:99')) < (b.date + (b.time || '99:99')) ? -1 : 1;
+    }).slice(0, 6);
+    var html = late ? '<span class="overdue">' + late + (late === 1 ? ' item is' : ' items are') + ' overdue</span>' : '';
+    if (!next.length) html += '<p class="empty">No deadlines ahead. Add one with the form.</p>';
+    next.forEach(function (ev) {
+      html += '<button type="button" class="up t-' + ev.type + '" data-act="jump" data-date="' + ev.date + '"><span class="dot" style="margin-top:7px;flex:none"></span>' +
+        '<span class="body"><span class="t">' + esc(ev.title) + '</span><span class="meta">' + (ev.subject ? esc(ev.subject) + ' · ' : '') + TYPES[ev.type] + '</span></span>' +
+        '<span class="when">' + relLabel(ev.date) + '</span></button>';
+    });
+    $('upcoming').innerHTML = html;
+  }
+
+  function render() {
+    $('today-line').textContent = longDate(todayDate());
+    $('who-name').textContent = state.name;
+    renderCalendar(); renderAgenda(); renderTodos(); renderUpcoming();
+  }
+
+  /* navigation */
+  function updateFollow() { var t = todayDate(); state.follow = state.vy === t.getFullYear() && state.vm === t.getMonth(); }
+  function shiftMonth(n) {
+    var d = new Date(state.vy, state.vm + n, 1);
+    state.vy = d.getFullYear(); state.vm = d.getMonth();
+    updateFollow(); render();
+  }
+  function goTo(k) {
+    var d = parseKey(k);
+    state.sel = k; state.vy = d.getFullYear(); state.vm = d.getMonth();
+    updateFollow(); render();
+  }
+
+  /* actions */
+  function findById(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-act]');
+    if (!t) return;
+    var act = t.getAttribute('data-act'), id = t.getAttribute('data-id');
+    switch (act) {
+      case 'signout': signOut(); break;
+      case 'prev': shiftMonth(-1); break;
+      case 'next': shiftMonth(1); break;
+      case 'today': goTo(keyOf(todayDate())); break;
+      case 'pick': state.sel = t.getAttribute('data-date'); $('ev-date').value = state.sel; renderCalendar(); renderAgenda(); break;
+      case 'jump': goTo(t.getAttribute('data-date')); break;
+      case 'toggle-ev': var ev = findById(state.data.events, id); if (ev) { ev.done = !ev.done; save(); render(); } break;
+      case 'del-ev': state.data.events = state.data.events.filter(function (x) { return x.id !== id; }); save(); render(); break;
+      case 'toggle-todo': var td = findById(state.data.todos, id); if (td) { td.done = !td.done; save(); renderTodos(); } break;
+      case 'del-todo': state.data.todos = state.data.todos.filter(function (x) { return x.id !== id; }); save(); renderTodos(); break;
+      case 'clear-done': state.data.todos = state.data.todos.filter(function (x) { return !x.done; }); save(); renderTodos(); break;
+    }
+  });
+
+  $('ev-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var err = $('ev-err'), title = $('ev-title').value.trim(), date = $('ev-date').value;
+    err.textContent = '';
+    if (!title) { err.textContent = 'Give it a short name, like "Chapter 5 problem set".'; return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { err.textContent = 'Pick the due date.'; return; }
+    state.data.events.push({ id: uid(), title: title, subject: $('ev-subject').value.trim(), type: $('ev-type').value, date: date, time: $('ev-time').value, done: false });
+    save();
+    $('ev-title').value = ''; $('ev-subject').value = ''; $('ev-time').value = '';
+    goTo(date);
+  });
+
+  $('todo-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var text = $('todo-text').value.trim();
+    if (!text) { $('todo-err').textContent = 'Type what you need to do first.'; return; }
+    $('todo-err').textContent = '';
+    state.data.todos.push({ id: uid(), text: text, done: false });
+    save();
+    $('todo-text').value = '';
+    renderTodos();
+  });
+
+  /* keep days crossed as time passes; roll to the new month */
+  function tick() {
+    var tk = keyOf(todayDate());
+    if (tk === state.lastToday) return;
+    var prev = state.lastToday;
+    state.lastToday = tk;
+    if (state.sel === prev) state.sel = tk;
+    if (state.follow) { var t = todayDate(); state.vy = t.getFullYear(); state.vm = t.getMonth(); }
+    render();
+  }
+  setInterval(tick, 30000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
+
+  renderDow();
+  render();
+})();
+</script>
+</body>
+</html>
